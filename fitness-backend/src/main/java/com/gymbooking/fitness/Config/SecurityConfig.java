@@ -1,29 +1,54 @@
     package com.gymbooking.fitness.Config;
 
+
+    import com.gymbooking.fitness.UserAuthService;
     import org.springframework.context.annotation.Bean;
     import org.springframework.context.annotation.Configuration;
-    import org.springframework.security.authentication.AuthenticationManager;
-    import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+    import org.springframework.http.HttpMethod;
+    import org.springframework.security.config.Customizer;
+    import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
     import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-    import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+    import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+    import org.springframework.security.config.http.SessionCreationPolicy;
     import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
     import org.springframework.security.crypto.password.PasswordEncoder;
     import org.springframework.security.web.SecurityFilterChain;
 
     @Configuration
+    @EnableWebSecurity
     public class SecurityConfig {
 
+        private final UserAuthService userAuthService;
+
+        public SecurityConfig(UserAuthService userAuthService) {
+            this.userAuthService = userAuthService;
+        }
+
         @Bean
-        public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
             http
-                    .csrf(AbstractHttpConfigurer::disable)
-                    .authorizeHttpRequests(auth -> auth
-                            .requestMatchers("/api/login", "/api/register").permitAll()
+                    .csrf(csrf -> csrf.disable()) // Activate in production
+                    .cors(Customizer.withDefaults())
+                    .authorizeHttpRequests(authorize -> authorize
+                            .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/login").permitAll()
+                            .requestMatchers(HttpMethod.DELETE, "/api/**").hasAnyRole("ADMIN")
+                            .requestMatchers(HttpMethod.POST, "/api/**").hasAnyRole("ADMIN")   // ändrat till att alla kan lägga till
+                            .requestMatchers(HttpMethod.GET, "/api/**").permitAll()
+                            .requestMatchers(HttpMethod.PUT, "/api/**").hasAnyRole("USER", "ADMIN")
                             .anyRequest().authenticated()
                     )
-                    .sessionManagement(session -> session.maximumSessions(1))
-                    .formLogin(AbstractHttpConfigurer::disable)  // <--- metodreferens
-                    .httpBasic(AbstractHttpConfigurer::disable);
+                    .sessionManagement(session -> session  //code from frontend
+                            .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                    );
+
+
+            http
+                    //.formLogin(Customizer.withDefaults()) //This i original from backend, not in updated request from frontend.
+                    .logout(logout -> logout
+                            .logoutUrl("/logout")
+                            .invalidateHttpSession(true)
+                            .deleteCookies("JSESSIONID")
+                    );
 
             return http.build();
         }
@@ -34,7 +59,12 @@
         }
 
         @Bean
-        public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-            return config.getAuthenticationManager();
+        public org.springframework.security.authentication.AuthenticationManager authenticationManager(HttpSecurity http) throws Exception {
+            AuthenticationManagerBuilder authenticationManagerBuilder =
+                    http.getSharedObject(AuthenticationManagerBuilder.class);
+            authenticationManagerBuilder.userDetailsService(userAuthService)
+                    .passwordEncoder(passwordEncoder());
+
+            return authenticationManagerBuilder.build();
         }
     }
